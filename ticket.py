@@ -47,176 +47,176 @@ creationTime = None
 
 def rotateKeys( ):
 
-	log.debug("Rotating session ticket keys.")
+        log.debug("Rotating session ticket keys.")
 
-	global HMACKey
-	global AESKey
-	global creationTime
+        global HMACKey
+        global AESKey
+        global creationTime
 
-	HMACKey = mycrypto.strong_random(HMAC_KEY_LENGTH)
-	AESKey = mycrypto.strong_random(AES_KEY_LENGTH)
-	creationTime = int(time.time())
+        HMACKey = mycrypto.strong_random(HMAC_KEY_LENGTH)
+        AESKey = mycrypto.strong_random(AES_KEY_LENGTH)
+        creationTime = int(time.time())
 
-	try:
-		with open(const.DATA_DIRECTORY + const.KEY_STORE, "wb") as fd:
-			pickle.dump([creationTime, HMACKey, AESKey], fd)
-			fd.close()
-	except IOError as e:
-		log.error("Error opening ticket key file: %s." % e)
+        try:
+                with open(const.DATA_DIRECTORY + const.KEY_STORE, "wb") as fd:
+                        pickle.dump([creationTime, HMACKey, AESKey], fd)
+                        fd.close()
+        except IOError as e:
+                log.error("Error opening ticket key file: %s." % e)
 
 
 def loadKeys( ):
-	"""Try to load the AES and HMAC key from the key store."""
+        """Try to load the AES and HMAC key from the key store."""
 
-	log.debug("Reading session ticket keys from file.")
+        log.debug("Reading session ticket keys from file.")
 
-	global HMACKey
-	global AESKey
-	global creationTime
+        global HMACKey
+        global AESKey
+        global creationTime
 
-	if not os.path.exists(const.DATA_DIRECTORY + const.KEY_STORE):
-		rotateKeys()
-		return
+        if not os.path.exists(const.DATA_DIRECTORY + const.KEY_STORE):
+                rotateKeys()
+                return
 
-	try:
-		with open(const.DATA_DIRECTORY + const.KEY_STORE, "rb") as fd:
-			creationTime, HMACKey, AESKey = pickle.load(fd)
-			fd.close()
-	except IOError as e:
-		log.error("Error opening ticket key file: %s." % e)
+        try:
+                with open(const.DATA_DIRECTORY + const.KEY_STORE, "rb") as fd:
+                        creationTime, HMACKey, AESKey = pickle.load(fd)
+                        fd.close()
+        except IOError as e:
+                log.error("Error opening ticket key file: %s." % e)
 
 
 def checkKeys( ):
-	"""Load the AES and the HMAC key if they are not defined yet. If they are
-	expired, rotate the keys."""
+        """Load the AES and the HMAC key if they are not defined yet. If they are
+        expired, rotate the keys."""
 
-	if (HMACKey is None) or (AESKey is None):
-		loadKeys()
+        if (HMACKey is None) or (AESKey is None):
+                loadKeys()
 
-	if (int(time.time()) - creationTime) > const.KEY_ROTATION_TIME:
-		rotateKeys()
+        if (int(time.time()) - creationTime) > const.KEY_ROTATION_TIME:
+                rotateKeys()
 
 
 def decryptTicket( ticket ):
-	"""Verifies the validity, decrypts and finally returns the given potential
-	ticket as a ProtocolState object. If the ticket is invalid, `None' is
-	returned."""
+        """Verifies the validity, decrypts and finally returns the given potential
+        ticket as a ProtocolState object. If the ticket is invalid, `None' is
+        returned."""
 
-	assert len(ticket) == const.TICKET_LENGTH
+        assert len(ticket) == const.TICKET_LENGTH
 
-	global HMACKey
-	global AESKey
-	global creationTime
+        global HMACKey
+        global AESKey
+        global creationTime
 
-	log.debug("Attempting to verify and decrypt %d-byte ticket." % len(ticket))
+        log.debug("Attempting to verify and decrypt %d-byte ticket." % len(ticket))
 
-	checkKeys()
+        checkKeys()
 
-	# Verify if HMAC is correct.
-	hmac = HMAC.new(HMACKey, ticket[0:80], digestmod=SHA256).digest()
-	if hmac != ticket[80:const.TICKET_LENGTH]:
-		log.debug("Invalid HMAC. Probably no ticket.")
-		return None
+        # Verify if HMAC is correct.
+        hmac = HMAC.new(HMACKey, ticket[0:80], digestmod=SHA256).digest()
+        if hmac != ticket[80:const.TICKET_LENGTH]:
+                log.debug("Invalid HMAC. Probably no ticket.")
+                return None
 
-	# Decrypt ticket to obtain state.
-	aes = AES.new(AESKey, mode=AES.MODE_CBC, IV=ticket[0:16])
-	plainTicket = aes.decrypt(ticket[16:80])
+        # Decrypt ticket to obtain state.
+        aes = AES.new(AESKey, mode=AES.MODE_CBC, IV=ticket[0:16])
+        plainTicket = aes.decrypt(ticket[16:80])
 
-	issueDate = plainTicket[0:10]
-	identifier = plainTicket[10:28]
-	masterKey = plainTicket[28:60]
+        issueDate = plainTicket[0:10]
+        identifier = plainTicket[10:28]
+        masterKey = plainTicket[28:60]
 
-	if not (identifier == IDENTIFIER):
-		log.error("Valid HMAC but invalid identifier. This could be a bug.")
-		return None
+        if not (identifier == IDENTIFIER):
+                log.error("Valid HMAC but invalid identifier. This could be a bug.")
+                return None
 
-	return ProtocolState(masterKey, int(issueDate.encode('hex'), 16))
+        return ProtocolState(masterKey, int(issueDate.encode('hex'), 16))
 
 
 class ProtocolState( object ):
-	"""Describes the protocol state of a ScrambleSuit server which is part of a
-	session ticket. The state can be used to bootstrap a ScrambleSuit session
-	without the client unlocking the puzzle."""
+        """Describes the protocol state of a ScrambleSuit server which is part of a
+        session ticket. The state can be used to bootstrap a ScrambleSuit session
+        without the client unlocking the puzzle."""
 
-	def __init__( self, masterKey, issueDate=int(time.time()) ):
-		self.identifier = IDENTIFIER
-		#self.protocolVersion = None
-		self.masterKey = masterKey
-		#self.clientIdentity = None
-		self.issueDate = issueDate
-		# Pad to multiple of 16 bytes due to AES' block size.
-		self.pad = "\0\0\0\0"
-
-
-	def isValid( self ):
-		"""Returns `True' if the protocol state is valid, i.e., if the life time
-		has not expired yet. Otherwise, `False' is returned."""
-
-		assert self.issueDate
-		now = int(time.time())
-
-		if (now - self.issueDate) > const.SESSION_TICKET_LIFETIME:
-			log.debug("Ticket is not valid anymore.")
-			return False
-
-		return True
+        def __init__( self, masterKey, issueDate=int(time.time()) ):
+                self.identifier = IDENTIFIER
+                #self.protocolVersion = None
+                self.masterKey = masterKey
+                #self.clientIdentity = None
+                self.issueDate = issueDate
+                # Pad to multiple of 16 bytes due to AES' block size.
+                self.pad = "\0\0\0\0"
 
 
-	def __repr__( self ):
+        def isValid( self ):
+                """Returns `True' if the protocol state is valid, i.e., if the life time
+                has not expired yet. Otherwise, `False' is returned."""
 
-		return self.issueDate + self.identifier + self.masterKey + self.pad
+                assert self.issueDate
+                now = int(time.time())
+
+                if (now - self.issueDate) > const.SESSION_TICKET_LIFETIME:
+                        log.debug("Ticket is not valid anymore.")
+                        return False
+
+                return True
+
+
+        def __repr__( self ):
+
+                return self.issueDate + self.identifier + self.masterKey + self.pad
 
 
 class SessionTicket( object ):
-	"""Encapsulates a session ticket which can be used by the client to gain
-	access to a ScrambleSuit server without solving the served puzzle."""
+        """Encapsulates a session ticket which can be used by the client to gain
+        access to a ScrambleSuit server without solving the served puzzle."""
 
-	def __init__( self, masterKey ):
-		"""Initialize a new session ticket which contains `masterKey'. The
-		parameter `symmTicketKey' is used to encrypt the ticket and
-		`hmacTicketKey' is used to authenticate the ticket when issued."""
+        def __init__( self, masterKey ):
+                """Initialize a new session ticket which contains `masterKey'. The
+                parameter `symmTicketKey' is used to encrypt the ticket and
+                `hmacTicketKey' is used to authenticate the ticket when issued."""
 
-		assert len(masterKey) == const.MASTER_KEY_SIZE
+                assert len(masterKey) == const.MASTER_KEY_SIZE
 
-		checkKeys()
+                checkKeys()
 
-		# The random name is used to recognize previously issued tickets.
-		#self.keyName = mycrypto.weak_random(NAME_LENGTH)
+                # The random name is used to recognize previously issued tickets.
+                #self.keyName = mycrypto.weak_random(NAME_LENGTH)
 
-		# Initialization vector for AES-CBC.
-		self.IV = mycrypto.strong_random(IV_LENGTH)
+                # Initialization vector for AES-CBC.
+                self.IV = mycrypto.strong_random(IV_LENGTH)
 
-		# The server's actual (encrypted) protocol state.
-		self.state = ProtocolState(masterKey)
+                # The server's actual (encrypted) protocol state.
+                self.state = ProtocolState(masterKey)
 
-		# AES and HMAC key to protect the ticket.
-		self.symmTicketKey = AESKey
-		self.hmacTicketKey = HMACKey
+                # AES and HMAC key to protect the ticket.
+                self.symmTicketKey = AESKey
+                self.hmacTicketKey = HMACKey
 
 
-	def issue( self ):
-		"""Encrypt and authenticate the ticket and return the result which is
-		ready to be sent over the wire. In particular, the ticket name (for
-		bookkeeping) as well as the actual encrypted ticket is returned."""
+        def issue( self ):
+                """Encrypt and authenticate the ticket and return the result which is
+                ready to be sent over the wire. In particular, the ticket name (for
+                bookkeeping) as well as the actual encrypted ticket is returned."""
 
-		self.state.issueDate = "%d" % time.time()
+                self.state.issueDate = "%d" % time.time()
 
-		# Encrypt the protocol state.
-		aes = AES.new(self.symmTicketKey, mode=AES.MODE_CBC, IV=self.IV)
-		state = repr(self.state)
-		assert (len(state) % AES.block_size) == 0
-		cryptedState = aes.encrypt(state)
+                # Encrypt the protocol state.
+                aes = AES.new(self.symmTicketKey, mode=AES.MODE_CBC, IV=self.IV)
+                state = repr(self.state)
+                assert (len(state) % AES.block_size) == 0
+                cryptedState = aes.encrypt(state)
 
-		# Authenticate ticket name, IV and the encrypted state.
-		hmac = HMAC.new(self.hmacTicketKey, self.IV + \
-				cryptedState, digestmod=SHA256).digest()
+                # Authenticate ticket name, IV and the encrypted state.
+                hmac = HMAC.new(self.hmacTicketKey, self.IV + \
+                                cryptedState, digestmod=SHA256).digest()
 
-		ticket = self.IV + cryptedState + hmac
+                ticket = self.IV + cryptedState + hmac
 
-		log.debug("Returning %d-byte ticket." % (len(self.IV) +
-			len(cryptedState) + len(hmac)))
+                log.debug("Returning %d-byte ticket." % (len(self.IV) +
+                        len(cryptedState) + len(hmac)))
 
-		return ticket
+                return ticket
 
 
 # Alias class name in order to provide a more intuitive API.

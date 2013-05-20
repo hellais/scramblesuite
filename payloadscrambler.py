@@ -6,11 +6,11 @@ high-entropy filters) harder."""
 
 class PayloadScrambler:
 
-	def __init__( self ):
-		pass
+        def __init__( self ):
+                pass
 
-	def encode( self, data ):
-		pass
+        def encode( self, data ):
+                pass
 
-	def decode( self, data ):
-		pass
+        def decode( self, data ):
+                pass
