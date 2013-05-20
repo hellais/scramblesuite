@@ -120,8 +120,8 @@ class PayloadCrypter:
                 counter=self.counter)
 
 
-        def encrypt( self, data ):
-            """Encrypts the given `data' using AES."""
+    def encrypt( self, data ):
+        """Encrypts the given `data' using AES."""
 
         # Send unencrypted data if AES is not initialized yet.
         if self.crypter == None:
